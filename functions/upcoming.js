@@ -7,10 +7,11 @@ function base64URLEncode(str) {
     .replace(/=/g, '');
 }
 
-function createJWT(payload, secret) {
+function createJWT(payload, secret, keyId) {
   const header = {
     alg: "HS256",
-    typ: "JWT"
+    typ: "JWT",
+    kid: keyId  // Ghost expects the key ID in the header
   };
 
   const encodedHeader = base64URLEncode(Buffer.from(JSON.stringify(header)));
@@ -48,7 +49,7 @@ export async function handler() {
       exp: Math.floor(Date.now() / 1000) + 5 * 60 // 5 minutes from now
     };
 
-    const token = createJWT(payload, secret);
+    const token = createJWT(payload, secret, id);
 
     // Call Ghost Admin API
     console.log("Making request to:", `${apiUrl}?filter=status:scheduled`);
