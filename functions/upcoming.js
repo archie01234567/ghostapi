@@ -1,23 +1,31 @@
-import jwt from "jsonwebtoken";
+const jwt = require("jsonwebtoken");
 
 export async function handler() {
   const apiUrl = "https://lfapurpose.ghost.io/ghost/api/admin/posts/";
-
+  
   try {
-    // Split your Admin API key into ID + SECRET
-    const [id, secret] = process.env.GHOST_ADMIN_API_KEY.split(":");
+    const adminApiKey = process.env.GHOST_ADMIN_API_KEY;
+    
+    if (!adminApiKey) {
+      throw new Error("GHOST_ADMIN_API_KEY is not set");
+    }
 
-    // Create a JWT
+    const [id, secret] = adminApiKey.split(":");
+    
+    if (!id || !secret) {
+      throw new Error("Invalid GHOST_ADMIN_API_KEY format");
+    }
+
+    // Create JWT token
     const token = jwt.sign(
       {
-        kid: id, // key id
-        exp: Math.floor(Date.now() / 1000) + 5 * 60 // 5 min expiry
+        kid: id,
+        exp: Math.floor(Date.now() / 1000) + 5 * 60
       },
       Buffer.from(secret, "hex"),
       { algorithm: "HS256" }
     );
 
-    // Call Ghost Admin API
     const res = await fetch(`${apiUrl}?filter=status:scheduled`, {
       headers: {
         Authorization: `Ghost ${token}`,
@@ -26,13 +34,13 @@ export async function handler() {
     });
 
     const data = await res.json();
-
+    
     return {
       statusCode: 200,
       body: JSON.stringify(data, null, 2),
     };
-
   } catch (error) {
+    console.error("Function error:", error);
     return {
       statusCode: 500,
       body: JSON.stringify({ error: error.message }),
