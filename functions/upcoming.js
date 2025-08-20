@@ -51,6 +51,9 @@ export async function handler() {
     const token = createJWT(payload, secret);
 
     // Call Ghost Admin API
+    console.log("Making request to:", `${apiUrl}?filter=status:scheduled`);
+    console.log("Authorization header:", `Ghost ${token.substring(0, 50)}...`);
+    
     const res = await fetch(`${apiUrl}?filter=status:scheduled`, {
       headers: {
         Authorization: `Ghost ${token}`,
@@ -58,8 +61,20 @@ export async function handler() {
       },
     });
 
+    console.log("Response status:", res.status);
+    console.log("Response headers:", Object.fromEntries(res.headers.entries()));
+    
     if (!res.ok) {
-      throw new Error(`Ghost API error: ${res.status} ${res.statusText}`);
+      // Get the response body for more details
+      let errorBody;
+      try {
+        errorBody = await res.text();
+        console.log("Error response body:", errorBody);
+      } catch (e) {
+        console.log("Could not read error response body");
+      }
+      
+      throw new Error(`Ghost API error: ${res.status} ${res.statusText}. Body: ${errorBody || 'No body'}`);
     }
 
     const data = await res.json();
