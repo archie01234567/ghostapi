@@ -1,26 +1,16 @@
-import fetch from "node-fetch";
-import jwt from "jsonwebtoken";
+export async function handler(event, context) {
+  try {
+    const res = await fetch("https://lfapurpose.ghost.io/ghost/api/content/posts/?key=YOUR_CONTENT_API_KEY&filter=visibility:public+status:scheduled&limit=3&order=published_at%20asc");
+    const data = await res.json();
 
-export async function handler() {
-  const apiUrl = "https://lfapurpose.ghost.io/ghost/api/admin/posts/";
-  const adminKey = process.env.GHOST_ADMIN_KEY; // stored in Netlify env vars
-
-  const [id, secret] = adminKey.split(':');
-  const token = jwt.sign({}, Buffer.from(secret, 'hex'), {
-    keyid: id,
-    algorithm: 'HS256',
-    expiresIn: '5m',
-    audience: `/v5/admin/`
-  });
-
-  const response = await fetch(`${apiUrl}?filter=status:scheduled&limit=5`, {
-    headers: { Authorization: `Ghost ${token}` }
-  });
-
-  const data = await response.json();
-
-  return {
-    statusCode: 200,
-    body: JSON.stringify(data.posts, null, 2)
-  };
+    return {
+      statusCode: 200,
+      body: JSON.stringify(data),
+    };
+  } catch (err) {
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: err.message }),
+    };
+  }
 }
