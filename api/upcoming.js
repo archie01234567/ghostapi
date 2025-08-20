@@ -1,7 +1,7 @@
 import fetch from "node-fetch";
 
 export default async function handler(req, res) {
-  const apiUrl = "http://localhost:2368/ghost/api/admin/posts/";
+  const apiUrl = "https://lfapurpose.com/ghost/api/admin/posts/";
   const adminKey = process.env.GHOST_ADMIN_KEY;
 
   // Build JWT token for Ghost Admin API
@@ -20,3 +20,4 @@ export default async function handler(req, res) {
 
   res.status(200).json(data.posts);
 }
+
