@@ -30,10 +30,10 @@ export async function handler() {
   const apiUrl = "https://lfapurpose.ghost.io/ghost/api/admin/posts/";
   
   try {
-    const adminApiKey = process.env.GHOST_ADMIN_API_KEY;
+    const adminApiKey = process.env.GHOST_API_KEY;
     
     if (!adminApiKey) {
-      throw new Error("GHOST_ADMIN_API_KEY is not set");
+      throw new Error("GHOST_API_KEY is not set");
     }
 
     const [id, secret] = adminApiKey.split(":");
