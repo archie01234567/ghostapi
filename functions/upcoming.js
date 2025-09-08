@@ -1,148 +1,127 @@
+// functions/ghost-featured-merged.js
 import crypto from 'crypto';
 
-function base64URLEncode(buf) {
-  return buf.toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+/**
+ * base64url encoding (no padding)
+ */
+function base64url(input) {
+  const b = Buffer.isBuffer(input) ? input : Buffer.from(String(input));
+  return b.toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 }
 
-function createGhostJWT(keyId, secret) {
-  const header = {
-    alg: 'HS256',
-    typ: 'JWT',
-    kid: keyId
-  };
+/**
+ * Create Ghost Admin JWT from adminKey "id:secretHex"
+ */
+function createGhostAdminJWT(adminKey) {
+  if (!adminKey) throw new Error('GHOST_ADMIN_API_KEY not provided');
+  const [kid, secretHex] = adminKey.split(':');
+  if (!kid || !secretHex) throw new Error('GHOST_ADMIN_API_KEY must be in "id:secretHex" format');
 
-  const payload = {
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 5 * 60,
-    aud: '/admin/'
-  };
+  const header = { alg: 'HS256', typ: 'JWT', kid };
+  const iat = Math.floor(Date.now() / 1000);
+  const payload = { iat, exp: iat + 5 * 60, aud: '/admin/' };
 
-  const encodedHeader = base64URLEncode(Buffer.from(JSON.stringify(header)));
-  const encodedPayload = base64URLEncode(Buffer.from(JSON.stringify(payload)));
-  const signingInput = `${encodedHeader}.${encodedPayload}`;
+  const headerB64 = base64url(JSON.stringify(header));
+  const payloadB64 = base64url(JSON.stringify(payload));
+  const unsigned = `${headerB64}.${payloadB64}`;
 
-  const signature = crypto
-    .createHmac('sha256', Buffer.from(secret, 'hex'))
-    .update(signingInput)
-    .digest();
+  const signatureBase64 = crypto
+    .createHmac('sha256', Buffer.from(secretHex, 'hex'))
+    .update(unsigned)
+    .digest('base64');
 
-  const encodedSignature = base64URLEncode(signature);
-
-  return `${encodedHeader}.${encodedPayload}.${encodedSignature}`;
+  const signatureB64url = signatureBase64.replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  return `${unsigned}.${signatureB64url}`;
 }
 
-async function updatePostToFeatured(post, token) {
-  const updateUrl = `https://lfapurpose.ghost.io/ghost/api/admin/posts/${post.id}/`;
-  
-  const response = await fetch(updateUrl, {
-    method: 'PUT',
-    headers: {
-      'Authorization': `Ghost ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      posts: [{
-        ...post,
-        featured: true,
-        updated_at: new Date().toISOString()
-      }]
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to update post ${post.id}: ${response.status}`);
-  }
-
-  return response.json();
-}
-
-export async function handler(event, context) {
+/**
+ * Serverless handler
+ */
+export async function handler(event) {
   const headers = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Accept',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Content-Type': 'application/json',
+    'Cache-Control': 'no-store',
   };
 
+  if (event && event.httpMethod === 'OPTIONS') {
+    return { statusCode: 204, headers };
+  }
+
   try {
-    const adminApiKey = process.env.GHOST_ADMIN_API_KEY || process.env.GHOST_API_KEY;
-    if (!adminApiKey) throw new Error("GHOST_ADMIN_API_KEY (or GHOST_API_KEY) is not set");
+    const adminKey = process.env.GHOST_ADMIN_API_KEY || process.env.GHOST_API_KEY;
+    const ghostUrl = (process.env.GHOST_ADMIN_URL || process.env.GHOST_URL || '').replace(/\/$/, '');
 
-    const [id, secret] = adminApiKey.split(':');
-    if (!id || !secret) throw new Error("Invalid API key format. Expected 'id:secret'");
+    if (!adminKey) throw new Error('GHOST_ADMIN_API_KEY environment variable is not set');
+    if (!ghostUrl) throw new Error('GHOST_ADMIN_URL environment variable is not set');
 
-    const token = createGhostJWT(id, secret);
-    const apiUrl = 'https://lfapurpose.ghost.io/ghost/api/admin/posts/';
-    const url = `${apiUrl}?filter=status:scheduled&limit=all`;
+    const token = createGhostAdminJWT(adminKey);
 
-    // Fetch scheduled posts
-    const response = await fetch(url, {
+    // 🔑 Combined filter: published featured OR scheduled featured
+    const filter = 'featured:true+(status:published,status:scheduled)';
+
+    // limit fields to what we need
+    const fields = 'id,title,slug,feature_image,custom_excerpt,excerpt,status,published_at,scheduled_at,visibility,created_at';
+
+    const apiUrl = `${ghostUrl}/ghost/api/admin/posts/?filter=${encodeURIComponent(filter)}&limit=all&fields=${encodeURIComponent(fields)}`;
+
+    const res = await fetch(apiUrl, {
+      method: 'GET',
       headers: {
-        'Authorization': `Ghost ${token}`,
-        'Content-Type': 'application/json',
-      }
+        Authorization: `Ghost ${token}`,
+        'Accept-Version': 'v5.0',
+      },
     });
 
-    if (!response.ok) {
-      throw new Error(`Ghost API error: ${response.status}`);
+    const text = await res.text();
+    if (!res.ok) {
+      return {
+        statusCode: res.status || 500,
+        headers,
+        body: JSON.stringify({ success: false, status: res.status, body: text }),
+      };
     }
 
-    const data = await response.json();
-    const scheduledPosts = data.posts || [];
+    const json = JSON.parse(text);
+    const rawPosts = json.posts || [];
 
-    // Update each scheduled post to featured
-    const updateResults = [];
-    for (const post of scheduledPosts) {
-      try {
-        if (!post.featured) {
-          const result = await updatePostToFeatured(post, token);
-          updateResults.push({
-            id: post.id,
-            title: post.title,
-            status: 'success',
-            featured: result.posts[0].featured
-          });
-        } else {
-          updateResults.push({
-            id: post.id,
-            title: post.title,
-            status: 'skipped',
-            message: 'Already featured'
-          });
-        }
-      } catch (error) {
-        updateResults.push({
-          id: post.id,
-          title: post.title,
-          status: 'error',
-          error: error.message
-        });
-      }
-    }
+    // Normalize + pick fields
+    const posts = rawPosts.map((p) => {
+      const dateRef = p.scheduled_at || p.published_at || p.created_at || null;
+      return {
+        id: p.id,
+        title: p.title,
+        slug: p.slug,
+        feature_image: p.feature_image,
+        excerpt: p.custom_excerpt || p.excerpt || '',
+        status: p.status,
+        published_at: p.published_at || null,
+        scheduled_at: p.scheduled_at || null,
+        visibility: p.visibility || null,
+        dateRef,
+      };
+    });
+
+    // Sort by nearest dateRef ascending
+    posts.sort((a, b) => {
+      const da = a.dateRef ? new Date(a.dateRef).getTime() : 0;
+      const db = b.dateRef ? new Date(b.dateRef).getTime() : 0;
+      return da - db;
+    });
 
     return {
       statusCode: 200,
       headers,
-      body: JSON.stringify({
-        success: true,
-        updatedPosts: updateResults,
-        totalScheduled: scheduledPosts.length,
-        meta: data.meta || {}
-      }, null, 2)
+      body: JSON.stringify({ success: true, count: posts.length, posts }, null, 2),
     };
-
-  } catch (error) {
-    console.error('Function error:', error);
+  } catch (err) {
+    console.error('ghost-featured-merged error', err);
     return {
       statusCode: 500,
       headers,
-      body: JSON.stringify({
-        success: false,
-        error: error.message,
-        timestamp: new Date().toISOString()
-      }, null, 2)
+      body: JSON.stringify({ success: false, error: err.message }),
     };
   }
 }
