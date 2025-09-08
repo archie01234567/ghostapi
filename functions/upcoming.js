@@ -72,7 +72,7 @@ export async function handler(event, context) {
 
     // Make the API request
     const apiUrl = 'https://lfapurpose.ghost.io/ghost/api/admin/posts/';
-const url = `${apiUrl}?filter=featured:true+status:(published,scheduled)&limit=all`;
+const url = `${apiUrl}?filter=status:scheduled+featured:true&limit=all`;
 
     
     console.log('Making request to:', url);
@@ -130,5 +130,6 @@ const url = `${apiUrl}?filter=featured:true+status:(published,scheduled)&limit=a
     };
   }
 }
+
 
 
